@@ -1,0 +1,21 @@
+{
+  "name": "@securechat/crypto-core",
+  "version": "0.1.0",
+  "description": "Cryptographic core for SecureChat: key generation, X3DH, Double Ratchet, encryption primitives.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "libsodium-wrappers": "^0.7.13"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers": "^0.7.13",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  }
+}
