@@ -8,10 +8,14 @@ Currently implemented:
 - [x] Project structure
 - [x] `crypto-core` package scaffolded
 - [x] Identity key generation (Ed25519 signing + X25519 key agreement pair) with tests
-- [ ] X3DH key exchange
+- [x] Prekeys (signed + one-time) with signature verification, with tests
+- [x] HKDF-BLAKE2b key derivation, with tests
+- [x] X3DH key exchange — initiator/recipient both derive the same shared secret, with tests
 - [ ] Double Ratchet
 - [ ] Server relay
 - [ ] Mobile client
+
+**21/21 tests passing** across `crypto-core`.
 
 ## Packages
 
