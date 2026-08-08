@@ -40,5 +40,12 @@ export type {
   RatchetReceiveResult,
 } from './ratchet/doubleRatchet';
 
+export { encryptMessage, decryptMessage } from './encryption/messageCipher';
+export type { EncryptedPayload } from './encryption/messageCipher';
+
+export { encryptSecureMessage, decryptSecureMessage } from './messaging/secureMessage';
+export type { SecureMessage, EncryptResult, DecryptResult } from './messaging/secureMessage';
+
 // Coming in later phases:
-// export * from './encryption/aesGcm'; // AEAD layer that seals message content using ratchet message keys
+// - Skipped-message-key handling for out-of-order delivery (ratchet)
+// - Server relay integration
