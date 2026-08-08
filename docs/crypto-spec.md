@@ -69,15 +69,37 @@ can't currently be recovered. Real-world transport can reorder or drop messages,
 this needs to be solved — likely a bounded skipped-key cache, Signal-style — before
 the ratchet goes into the actual client/server pipeline.
 
+### Message Cipher (`crypto-core/src/encryption/messageCipher.ts`)
+AEAD encryption for individual message payloads, using XChaCha20-Poly1305 (IETF
+variant) instead of AES-256-GCM. Two practical reasons: it's in
+`libsodium-wrappers`' minimal build (no need for the larger "sumo" build, same
+situation as HKDF/HMAC — see below), and its 24-byte nonce is large enough to
+generate randomly per message with negligible collision risk — AES-GCM's 12-byte
+nonce isn't, and would need a managed counter instead. Same AEAD security guarantees
+either way; this is a practical substitution, not a downgrade. Verified in
+`tests/messageCipher.test.ts` (7 tests): round-trip correctness, wrong key rejected,
+tampered ciphertext rejected, tampered associated data rejected, wrong key length
+rejected, and nonce/ciphertext uniqueness across repeated calls.
+
+### Secure Message (`crypto-core/src/messaging/secureMessage.ts`)
+Thin integration layer: `encryptSecureMessage` / `decryptSecureMessage` combine the
+ratchet and the cipher into the two calls an application actually needs. The ratchet
+header is deterministically serialized and passed as AEAD associated data, binding
+the (necessarily unencrypted) header to the ciphertext — a tampered header fails
+decryption rather than being silently accepted.
+
+**This closes the loop**: `tests/secureMessage.test.ts` runs the complete pipeline —
+identity keys → prekeys → X3DH → Double Ratchet → AEAD — and proves Alice can send a
+real text message that Bob decrypts back to the exact same text, including a
+multi-message back-and-forth conversation across a ratchet direction flip, and that
+tampering with either the ciphertext or the header is detected and rejected.
+
 ## Coming next (Phase 1 wrap-up)
 
-- **AEAD encryption layer** (`crypto-core/src/encryption/`): take a message key from
-  the ratchet and actually seal/open message content. Leading candidate:
-  XChaCha20-Poly1305, since it's in `libsodium-wrappers`' minimal build (unlike
-  AES-GCM) and its 24-byte nonce is large enough to generate randomly per message
-  without a managed counter.
 - **Skipped-message-key handling** in the ratchet, so out-of-order or delayed
   messages can still be decrypted — needed before Phase 2 wiring.
+- **Key storage**: secure persistence of identity/prekey/ratchet state on-device
+  (currently everything lives only in memory for the duration of a test/process).
 
 ## Coming after that (Phase 2)
 

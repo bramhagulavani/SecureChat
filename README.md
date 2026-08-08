@@ -12,15 +12,17 @@ Currently implemented:
 - [x] HKDF-BLAKE2b key derivation, with tests
 - [x] X3DH key exchange — initiator/recipient both derive the same shared secret, with tests
 - [x] Double Ratchet — per-message key evolution + DH ratchet healing, with tests
-- [ ] AEAD message encryption (seal/open actual message content)
+- [x] AEAD message encryption (XChaCha20-Poly1305) with tests
+- [x] Full pipeline proven end-to-end: X3DH → Double Ratchet → AEAD, real text
+      message encrypted by Alice and decrypted correctly by Bob, with tests
 - [ ] Skipped-message-key handling (out-of-order delivery) — currently unsupported, documented limitation
+- [ ] Key persistence (secure on-device storage)
 - [ ] Server relay
 - [ ] Mobile client
 
-**27/27 tests passing** across `crypto-core`. Key agreement (X3DH) and per-message key
-evolution (Double Ratchet) are implemented and tested; actual message encryption and
-out-of-order delivery support are not yet built — see `docs/crypto-spec.md` for exact
-scope and known limitations.
+**38/38 tests passing** across `crypto-core`. The core crypto pipeline for 1:1
+messaging is functionally complete for in-order delivery; out-of-order handling,
+persistence, networking, and UI remain.
 
 ## Packages
 
