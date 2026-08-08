@@ -19,12 +19,26 @@ export {
 
 export type { SignedPreKeyPair, OneTimePreKeyPair } from './keys/prekeys';
 
-export { hkdfBlake2b } from './encryption/hkdfBlake2b';
+export { hkdfBlake2b, keyedBlake2b } from './encryption/hkdfBlake2b';
 
 export { initiateX3DH, receiveX3DH } from './x3dh/x3dh';
 
 export type { PreKeyBundle, KeyPair, X3DHInitiatorResult } from './x3dh/x3dh';
 
+export {
+  initializeRatchetAsInitiator,
+  initializeRatchetAsResponder,
+  ratchetEncrypt,
+  ratchetDecrypt,
+} from './ratchet/doubleRatchet';
+
+export type {
+  RatchetState,
+  DHKeyPair,
+  RatchetHeader,
+  RatchetSendResult,
+  RatchetReceiveResult,
+} from './ratchet/doubleRatchet';
+
 // Coming in later phases:
-// export * from './ratchet/doubleRatchet';
-// export * from './encryption/aesGcm';
+// export * from './encryption/aesGcm'; // AEAD layer that seals message content using ratchet message keys

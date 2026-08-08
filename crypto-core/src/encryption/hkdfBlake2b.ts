@@ -87,3 +87,18 @@ export async function hkdfBlake2b(
   const prk = extract(salt, ikm);
   return expand(prk, info, length);
 }
+
+/**
+ * Exposes the raw keyed-BLAKE2b PRF directly (not the full HKDF construction).
+ * Used by the Double Ratchet's symmetric-key ratchet (KDF_CK), which per the
+ * Signal spec derives each step from a single keyed-hash call with a fixed
+ * constant byte, not a full HKDF pass. `key` must be 16-64 bytes.
+ */
+export async function keyedBlake2b(
+  key: Uint8Array,
+  message: Uint8Array,
+  outputLength: number = HASH_LEN
+): Promise<Uint8Array> {
+  await ensureReady();
+  return new Uint8Array(sodium.crypto_generichash(outputLength, message, key));
+}
