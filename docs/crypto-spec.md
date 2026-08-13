@@ -53,21 +53,25 @@ This shared secret becomes the root key that seeds the Double Ratchet.
   starting ratchet key). `ratchetEncrypt` advances the sending chain by one message.
   `ratchetDecrypt` advances the receiving chain, automatically running a full DH
   ratchet step first whenever the incoming header carries a DH public key that's new
-  to that side.
-- Verified in `tests/doubleRatchet.test.ts` (6 tests): matching keys between Alice and
-  Bob, distinct keys per message (forward secrecy), staying in sync across several
-  messages and across a direction flip, and — the key property — a simulated leaked
-  message key no longer matches anything produced after the next DH ratchet step
-  (post-compromise "healing").
-- Produces *message keys* only, not ciphertext — see "Coming next" below.
-
-**Current, honestly-documented limitation**: this implementation assumes in-order
-delivery within a chain. An out-of-order message currently causes `ratchetDecrypt` to
-throw rather than being silently mishandled (covered by a dedicated test), but there
-is no skipped-message-key store yet, so a message that's lost or arrives very late
-can't currently be recovered. Real-world transport can reorder or drop messages, so
-this needs to be solved — likely a bounded skipped-key cache, Signal-style — before
-the ratchet goes into the actual client/server pipeline.
+  to that side. It also handles **out-of-order and skipped messages**: if a header's
+  message number is ahead of what's expected, the intermediate message keys are
+  derived and cached (bounded — see below) rather than discarded, so a late-arriving
+  earlier message can still be decrypted from the cache. This applies across a DH
+  ratchet step too, using the header's `previousChainLength` field to know how many
+  messages were left unreceived on the old chain before it was retired. A message
+  number below what's expected and not found in the cache is treated as a
+  duplicate/replay and rejected.
+- Both the per-step skip count and the total cache size are bounded
+  (`MAX_SKIP_PER_CHAIN_STEP`, `MAX_STORED_SKIPPED_KEYS` in `ratchetState.ts`), so a
+  peer claiming a huge message-number jump can't force unbounded work or memory use.
+- Verified in `tests/doubleRatchet.test.ts` (10 tests): matching keys between Alice
+  and Bob, distinct keys per message (forward secrecy), staying in sync across
+  several messages and across a direction flip, healing after a simulated key leak
+  (post-compromise security), decrypting a message that arrives ahead of schedule,
+  later decrypting an earlier message from the skipped-key cache, out-of-order
+  delivery across a DH ratchet step, rejecting a replayed message, and rejecting an
+  unreasonably large claimed gap.
+- Produces *message keys* only, not ciphertext — see Message Cipher below.
 
 ### Message Cipher (`crypto-core/src/encryption/messageCipher.ts`)
 AEAD encryption for individual message payloads, using XChaCha20-Poly1305 (IETF
@@ -96,8 +100,6 @@ tampering with either the ciphertext or the header is detected and rejected.
 
 ## Coming next (Phase 1 wrap-up)
 
-- **Skipped-message-key handling** in the ratchet, so out-of-order or delayed
-  messages can still be decrypted — needed before Phase 2 wiring.
 - **Key storage**: secure persistence of identity/prekey/ratchet state on-device
   (currently everything lives only in memory for the duration of a test/process).
 
