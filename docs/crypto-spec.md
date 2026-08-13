@@ -103,14 +103,47 @@ tampering with either the ciphertext or the header is detected and rejected.
 - **Key storage**: secure persistence of identity/prekey/ratchet state on-device
   (currently everything lives only in memory for the duration of a test/process).
 
-## Coming after that (Phase 2)
+## Phase 2: Relay Server (`server/`)
 
-- **Relay server**: WebSocket connection manager + ciphertext-only message router,
-  registration and prekey-bundle publishing API.
+A real, tested HTTP + WebSocket server. Deliberately architected so it *cannot*
+decrypt anything even if a bug were introduced: `server/package.json` does not
+depend on `crypto-core` at all, and every field the server touches — keys,
+signatures, ciphertext, nonces — is stored and forwarded as an opaque base64
+string. Verified in 17 tests across three files, including two integration tests
+that boot a real server and connect real WebSocket clients.
+
+- **`store/userStore.ts`**: in-memory registration + prekey bundle storage. Each
+  bundle fetch consumes (removes) one one-time prekey, mirroring the real X3DH flow;
+  a bundle with no one-time prekeys left still works (X3DH degrades gracefully).
+  Placeholder for a real database — the interface is narrow enough that swapping in
+  Postgres later shouldn't require touching the API layer.
+- **`store/messageQueue.ts`**: in-memory per-recipient queue for offline delivery.
+  Also a placeholder for durable storage (messages currently don't survive a restart).
+- **`ws/connectionManager.ts`**: tracks which usernames have an open socket.
+- **`ws/messageRouter.ts`**: the actual relay — forwards to a connected recipient
+  immediately, or queues for later. Only ever touches `from`/`to` routing metadata
+  and passes `header`/`ciphertext`/`nonce` through untouched; verified directly by a
+  test asserting byte-for-byte pass-through.
+- **`api/users.routes.ts`**: `POST /users/register`, `GET /users/:username/prekey-bundle`,
+  `POST /users/:username/prekeys` (replenishment).
+- **`index.ts` / `app.ts`**: wires HTTP + WebSocket onto one server; `app.ts` is
+  separated out so tests can exercise the Express app directly via `supertest`
+  without binding a real port.
+
+**Documented limitation, not yet solved**: WebSocket identity is just a
+`?username=` query param with no authentication. Fine for local dev and these
+tests; anyone could claim any username in a real deployment. Needs a signed
+challenge or session token before this goes near real users — flagged clearly in
+`index.ts`'s docstring so it isn't missed.
+
+## Coming after that (Phase 2 wrap-up)
+
+- **Server auth**: replace the bare `?username=` WebSocket identification with a
+  signed challenge or session token issued at registration.
+- **Durable storage**: swap the in-memory user store and message queue for a real
+  database (Postgres, per the original plan) so data survives a restart.
 - **Mobile client integration**: wire `crypto-core` into `client-mobile`, local
-  encrypted message storage, the actual chat UI.
-- **Wire format**: define how a ratcheted message (header + ciphertext + nonce) gets
-  serialized for transport and stored/retrieved from the relay.
+  encrypted message storage, the actual chat UI, and connect it to this server.
 
 ## Known packaging notes
 
