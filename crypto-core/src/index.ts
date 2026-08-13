@@ -38,6 +38,7 @@ export type {
   RatchetHeader,
   RatchetSendResult,
   RatchetReceiveResult,
+  SkippedMessageKeyStore,
 } from './ratchet/doubleRatchet';
 
 export { encryptMessage, decryptMessage } from './encryption/messageCipher';
@@ -47,5 +48,5 @@ export { encryptSecureMessage, decryptSecureMessage } from './messaging/secureMe
 export type { SecureMessage, EncryptResult, DecryptResult } from './messaging/secureMessage';
 
 // Coming in later phases:
-// - Skipped-message-key handling for out-of-order delivery (ratchet)
+// - Key persistence (secure on-device storage)
 // - Server relay integration

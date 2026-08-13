@@ -5,13 +5,10 @@
  * stream of per-message keys, in both directions, for the lifetime of a
  * conversation.
  *
- * This module produces *message keys* - one-time symmetric keys, one per
+ * This module produces *message keys* — one-time symmetric keys, one per
  * message. It does not perform the actual AEAD encryption/decryption of
- * message content; that's a thin layer on top (coming next, in
- * `encryption/`), which will take a message key from here and use it with
- * AES-256-GCM or ChaCha20-Poly1305 to seal the plaintext. Separating the two
- * keeps the ratchet's state machine easy to test and reason about in
- * isolation.
+ * message content; see encryption/messageCipher.ts and
+ * messaging/secureMessage.ts for that layer.
  *
  * Roles, mirroring x3dh.ts:
  *   - Alice ("initiator") calls `initializeRatchetAsInitiator` right after
@@ -20,11 +17,20 @@
  *   - Bob ("responder") calls `initializeRatchetAsResponder` right after
  *     `receiveX3DH`, using the same signed-prekey keypair he already has.
  *
- * Known limitation (documented, not silently swallowed): this
- * implementation assumes messages arrive in order within a chain and does
- * not yet store skipped message keys for out-of-order delivery. Real-world
- * transport can reorder messages, so that's flagged as follow-up work
- * before this goes into the actual messaging pipeline.
+ * Out-of-order delivery: if a message arrives numbered ahead of what's
+ * expected, the messages in between are not lost — their keys are derived
+ * and cached (see ratchetState.ts's skipped-message-key store) so that if
+ * they arrive later, they can still be decrypted. This also applies across
+ * a DH ratchet step: any unreceived messages in the *old* chain (signaled
+ * by the header's previousChainLength) are skipped and cached before
+ * switching to the new chain, exactly as the Signal spec describes. Both
+ * the per-step skip count and the total cache size are bounded, so a
+ * malicious peer can't use a huge claimed message number to force
+ * unbounded work or memory use — see MAX_SKIP_PER_CHAIN_STEP and
+ * MAX_STORED_SKIPPED_KEYS in ratchetState.ts.
+ *
+ * A message number *below* what's expected, and not found in the skipped
+ * cache, is treated as a duplicate/replay and rejected.
  */
 
 import {
@@ -34,9 +40,13 @@ import {
   diffieHellman,
   kdfRootKey,
   kdfChainKey,
+  skipChainMessages,
+  skippedKeyLabel,
+  withSkippedMessageKeysAdded,
+  withSkippedMessageKeyRemoved,
 } from './ratchetState';
 
-export type { RatchetState, DHKeyPair } from './ratchetState';
+export type { RatchetState, DHKeyPair, SkippedMessageKeyStore } from './ratchetState';
 
 export interface RatchetHeader {
   dhPublicKey: Uint8Array;
@@ -87,6 +97,7 @@ export async function initializeRatchetAsInitiator(
     sendMessageNumber: 0,
     receiveMessageNumber: 0,
     previousSendingChainLength: 0,
+    skippedMessageKeys: new Map(),
   };
 }
 
@@ -111,6 +122,7 @@ export function initializeRatchetAsResponder(
     sendMessageNumber: 0,
     receiveMessageNumber: 0,
     previousSendingChainLength: 0,
+    skippedMessageKeys: new Map(),
   };
 }
 
@@ -144,22 +156,56 @@ export async function ratchetEncrypt(state: RatchetState): Promise<RatchetSendRe
 }
 
 /**
- * Processes an incoming message's header. If it carries a new DH public key
- * (i.e. the other party just turned the ratchet), performs a full DH
- * ratchet step first - deriving a fresh receiving chain (and priming a
- * fresh sending chain) - before advancing the symmetric ratchet to recover
- * this message's key.
+ * Processes an incoming message's header and returns the message key to
+ * decrypt it with. Handles three cases:
+ *
+ *  1. The header's DH key matches our current remote key and its message
+ *     number is next-in-line: normal symmetric ratchet advance.
+ *  2. The header's DH key matches but the message number is ahead of
+ *     expected: skip forward, caching the intermediate keys, then return
+ *     the requested one.
+ *  3. The header's DH key is new: perform a full DH ratchet step (skipping
+ *     any remaining messages in the old chain first, per previousChainLength),
+ *     then proceed as in case 1/2 on the new chain.
+ *
+ * A message number below what's expected is looked up in the skipped-key
+ * cache; if it's not there, it's treated as a duplicate/replay and rejected.
  */
 export async function ratchetDecrypt(
   state: RatchetState,
   header: RatchetHeader
 ): Promise<RatchetReceiveResult> {
+  // Case: this message's key was already derived and cached from an earlier skip — use it directly.
+  const cachedLabel = await skippedKeyLabel(header.dhPublicKey, header.messageNumber);
+  const cachedKey = state.skippedMessageKeys.get(cachedLabel);
+  if (cachedKey) {
+    return {
+      messageKey: cachedKey,
+      state: { ...state, skippedMessageKeys: withSkippedMessageKeyRemoved(state.skippedMessageKeys, cachedLabel) },
+    };
+  }
+
   let workingState = state;
 
   const isNewRatchetKey =
     !workingState.dhRemotePublicKey || !bytesEqual(header.dhPublicKey, workingState.dhRemotePublicKey);
 
   if (isNewRatchetKey) {
+    // Before switching chains, cache any messages we never received on the OLD receiving chain.
+    if (workingState.receivingChainKey && workingState.dhRemotePublicKey) {
+      const { chainKey: exhaustedChainKey, skipped } = await skipChainMessages(
+        workingState.dhRemotePublicKey,
+        workingState.receivingChainKey,
+        workingState.receiveMessageNumber,
+        header.previousChainLength
+      );
+      void exhaustedChainKey; // old chain is being retired; only its cached keys matter going forward
+      workingState = {
+        ...workingState,
+        skippedMessageKeys: withSkippedMessageKeysAdded(workingState.skippedMessageKeys, skipped),
+      };
+    }
+
     // Step 1: derive the receiving chain using our existing DH keypair against their new public key.
     const dhOutput1 = await diffieHellman(workingState.dhSelfKeyPair.privateKey, header.dhPublicKey);
     const { rootKey: rootKeyAfterReceive, chainKey: receivingChainKey } = await kdfRootKey(
@@ -176,6 +222,7 @@ export async function ratchetDecrypt(
     );
 
     workingState = {
+      ...workingState,
       rootKey: rootKeyAfterSend,
       dhSelfKeyPair: newSelfKeyPair,
       dhRemotePublicKey: header.dhPublicKey,
@@ -191,14 +238,33 @@ export async function ratchetDecrypt(
     throw new Error('ratchetDecrypt: no receiving chain established');
   }
 
-  if (header.messageNumber !== workingState.receiveMessageNumber) {
-    // Out-of-order / skipped-message handling isn't implemented yet - see module docstring.
+  if (header.messageNumber > workingState.receiveMessageNumber) {
+    // Message arrived ahead of expected: skip forward, caching the intermediate keys.
+    const { chainKey: advancedChainKey, skipped } = await skipChainMessages(
+      header.dhPublicKey,
+      workingState.receivingChainKey,
+      workingState.receiveMessageNumber,
+      header.messageNumber
+    );
+    workingState = {
+      ...workingState,
+      receivingChainKey: advancedChainKey,
+      receiveMessageNumber: header.messageNumber,
+      skippedMessageKeys: withSkippedMessageKeysAdded(workingState.skippedMessageKeys, skipped),
+    };
+  } else if (header.messageNumber < workingState.receiveMessageNumber) {
+    // Already passed this point in the chain and it wasn't in the skipped cache above: duplicate/replay.
     throw new Error(
-      `ratchetDecrypt: out-of-order message (expected messageNumber ${workingState.receiveMessageNumber}, got ${header.messageNumber}) - skipped-message keys not yet supported`
+      `ratchetDecrypt: duplicate or already-processed message (messageNumber ${header.messageNumber}, expected ${workingState.receiveMessageNumber})`
     );
   }
 
-  const { messageKey, nextChainKey } = await kdfChainKey(workingState.receivingChainKey);
+  const finalReceivingChainKey = workingState.receivingChainKey;
+  if (!finalReceivingChainKey) {
+    throw new Error('ratchetDecrypt: no receiving chain established');
+  }
+
+  const { messageKey, nextChainKey } = await kdfChainKey(finalReceivingChainKey);
 
   const newState: RatchetState = {
     ...workingState,
