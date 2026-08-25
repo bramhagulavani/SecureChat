@@ -59,3 +59,4 @@ curl http://localhost:3000/health
 No custom cryptographic primitives are implemented from scratch. All encryption, key exchange, and signing operations use `libsodium` (via `libsodium-wrappers`), a widely audited library. See `docs/crypto-spec.md`.
 
 The `server` package is architected so it cannot decrypt messages even if a bug were introduced: it never imports `crypto-core`, and only ever handles opaque base64 strings.
+
