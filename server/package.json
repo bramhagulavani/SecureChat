@@ -4,6 +4,7 @@
   "description": "SecureChat relay server. Routes ciphertext between clients — never sees plaintext or private keys.",
   "main": "dist/index.js",
   "scripts": {
+    "prepare": "tsc",
     "dev": "ts-node-dev src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
@@ -11,7 +12,8 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

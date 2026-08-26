@@ -55,24 +55,35 @@ export interface RemotePreKeyBundle {
   oneTimePreKey?: { keyId: number; publicKey: string };
 }
 
-/** Matches the JSON shape server/src/ws/messageRouter.ts sends/expects over the WebSocket. */
+/** Matches the JSON shape server/src/ws/messageRouter.ts sends/expects over the WebSocket.
+ * `header` is treated as a fully opaque blob by the server (it forwards the
+ * whole value untouched — see messageRouter.ts's sendToSocket) whereas
+ * `ciphertext`/`nonce` are explicit named fields the router reconstructs.
+ * x3dhInit therefore has to live INSIDE header to survive the trip through
+ * the relay — a sibling field would silently be dropped.
+ */
 export interface WireMessage {
   to?: string;
   from?: string;
-  header: { dhPublicKey: string; messageNumber: number; previousChainLength: number };
+  header: {
+    dhPublicKey: string;
+    messageNumber: number;
+    previousChainLength: number;
+    /**
+     * Only present on the very first message of a new conversation. Carries
+     * what the recipient needs to run the receiving side of X3DH — their own
+     * ratchet header key (dhPublicKey, above) is a *different* key,
+     * generated independently by the Double Ratchet, and isn't sufficient
+     * on its own.
+     */
+    x3dhInit?: {
+      ephemeralPublicKey: string;
+      signedPreKeyId: number;
+      oneTimePreKeyId?: number;
+    };
+  };
   ciphertext: string;
   nonce: string;
-  /**
-   * Only present on the very first message of a new conversation. Carries
-   * what the recipient needs to run the receiving side of X3DH — their own
-   * ratchet header key (above) is a *different* key, generated independently
-   * by the Double Ratchet, and isn't sufficient on its own.
-   */
-  x3dhInit?: {
-    ephemeralPublicKey: string;
-    signedPreKeyId: number;
-    oneTimePreKeyId?: number;
-  };
 }
 
 /** What the caller needs to complete X3DH setup: the ratchet state, plus what to attach to the first message. */
@@ -172,7 +183,7 @@ export async function acceptConversation(
   mySignedPreKey: SignedPreKeyPair,
   myOneTimePreKey: OneTimePreKeyPair | undefined,
   theirIdentityAgreementPublicKeyB64: string,
-  x3dhInit: WireMessage['x3dhInit']
+  x3dhInit: WireMessage['header']['x3dhInit']
 ): Promise<RatchetState> {
   if (!x3dhInit) {
     throw new Error('acceptConversation: first message is missing x3dhInit — cannot complete handshake');

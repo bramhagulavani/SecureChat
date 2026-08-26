@@ -54,7 +54,12 @@ describe('cryptoService', () => {
     // Alice encrypts her first message, attaching the X3DH handshake info Bob needs.
     const { wireMessage, state: aliceStateAfterSend } = await encryptText(aliceState, 'Hey Bob!');
     aliceState = aliceStateAfterSend;
-    const firstMessage: WireMessage = { ...wireMessage, to: 'bob', from: 'alice', x3dhInit: started.x3dhInit };
+    const firstMessage: WireMessage = {
+      ...wireMessage,
+      to: 'bob',
+      from: 'alice',
+      header: { ...wireMessage.header, x3dhInit: started.x3dhInit },
+    };
 
     // Bob accepts the conversation using Alice's identity key + the x3dhInit payload.
     let bobState = await acceptConversation(
@@ -62,7 +67,7 @@ describe('cryptoService', () => {
       bob.signedPreKey,
       bob.oneTimePreKeys[0],
       aliceIdentityAgreementPublicKeyB64,
-      firstMessage.x3dhInit
+      firstMessage.header.x3dhInit
     );
 
     const { plaintext, state: bobStateAfterReceive } = await decryptText(bobState, firstMessage);
@@ -82,14 +87,14 @@ describe('cryptoService', () => {
 
     const send1 = await encryptText(aliceState, 'first message');
     aliceState = send1.state;
-    const firstMessage: WireMessage = { ...send1.wireMessage, to: 'bob', from: 'alice', x3dhInit: started.x3dhInit };
+    const firstMessage: WireMessage = { ...send1.wireMessage, to: 'bob', from: 'alice', header: { ...send1.wireMessage.header, x3dhInit: started.x3dhInit } };
 
     let bobState = await acceptConversation(
       bob.identity,
       bob.signedPreKey,
       bob.oneTimePreKeys[0],
       aliceIdentityAgreementPublicKeyB64,
-      firstMessage.x3dhInit
+      firstMessage.header.x3dhInit
     );
 
     const recv1 = await decryptText(bobState, firstMessage);
