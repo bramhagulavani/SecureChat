@@ -1,43 +1,51 @@
 # SecureChat
 
-End-to-end encrypted messaging app. See `docs/project-plan.md` for the full roadmap.
+End-to-end encrypted messaging app. See [`docs/project-plan.md`](docs/project-plan.md)
+for the broader roadmap and [`docs/crypto-spec.md`](docs/crypto-spec.md) for the
+implemented cryptographic design.
 
-## Status: Phase 3 — Mobile Client (in progress)
+## Status: Phase 3 foundation in progress
 
-Currently implemented:
-- [x] Project structure
-- [x] `crypto-core` package — identity keys, prekeys, HKDF, X3DH, Double Ratchet
-      (with out-of-order/skipped-message handling), AEAD encryption (XChaCha20-
-      Poly1305). Full pipeline proven end-to-end. **42/42 tests passing.**
-- [x] `server` package — HTTP registration + prekey-bundle API, WebSocket relay
-      with offline message queuing, and signed-challenge authentication (proves
-      ownership of an identity key before a connection is accepted — including
-      tested impersonation and replay-attack rejection). Never decrypts
-      anything — doesn't even depend on `crypto-core`. **35/35 tests passing**,
-      including real end-to-end tests with actual WebSocket clients against a
-      real running server.
-- [x] `client-mobile` — crypto service layer bridging `crypto-core`'s raw bytes
-      to the server's base64/JSON wire format (registration payloads, X3DH
-      handshake init, encrypt/decrypt helpers), plus a Metro config aliasing
-      `libsodium-wrappers` (WASM, unsupported by Hermes) to a native RN
-      binding. **8/8 tests passing**, including a full simulated two-device
-      message round-trip through the exact functions the app calls.
-- [ ] Mobile UI/screens (onboarding, chat list, chat view) — not yet built
-- [ ] On-device secure key/message persistence — not yet built
-- [ ] Server auth session/reconnect handling (currently requires a fresh
-      signed challenge per connection — a usability gap, not a security one)
-- [ ] Durable server-side storage (currently in-memory only)
+The repository currently contains a tested cryptographic core, an in-memory relay
+server, and the mobile client's service layer. The React Native screens and a
+production-ready persistence/authentication layer are still to be built.
 
-See `docs/crypto-spec.md` for exact scope, design rationale, and known limitations
-of all three packages.
+Implemented:
+- [x] `crypto-core`: identity signing/agreement keys, signed and one-time prekeys,
+      HKDF-BLAKE2b, X3DH, Double Ratchet state management, XChaCha20-Poly1305,
+      and the secure-message integration layer.
+- [x] `server`: HTTP health, registration, prekey-bundle, and prekey-replenishment
+      endpoints; WebSocket ciphertext relay; offline message queuing.
+- [x] `client-mobile` service layer: base64 wire-format conversion, registration
+      payloads, X3DH setup, message encryption/decryption helpers, local identity
+      and ratchet-state serialization, and WebSocket URL/connection helpers.
+- [x] End-to-end integration coverage exists for the client service layer and the
+      server relay path.
+
+Current limitations:
+- [ ] Crypto-core has 30/32 tests passing. Two secure-message tests currently fail
+      because the ratchet imports skipped-message-key helpers that are not exported
+      by `ratchetState.ts`.
+- [ ] The server stores users, prekeys, and queued messages in memory only; all
+      state is lost on restart.
+- [ ] WebSocket identity is currently taken from the `?username=` query parameter.
+      The client has a signed-challenge helper, but the server does not yet expose
+      or verify the corresponding challenge flow.
+- [ ] Mobile persistence currently defaults to AsyncStorage (or an in-memory
+      adapter in Node tests). Long-term private identity keys still need platform
+      keystore/Secure Enclave storage.
+- [ ] React Native UI screens, navigation, reconnect/backoff behavior, and message
+      history are not implemented.
+- [ ] The mobile package's dependencies must be installed before its Vitest suite
+      can run in a fresh checkout.
 
 ## Packages
 
-| Package | Purpose | Status |
+| Package | Purpose | Current validation |
 |---|---|---|
-| `crypto-core` | All cryptographic logic. No networking, no UI. | 42/42 tests passing |
-| `server` | Relay server — routes ciphertext only, never decrypts, requires signed-challenge auth to connect. | 35/35 tests passing |
-| `client-mobile` | React Native app. Crypto/wire-format bridge built; UI and storage not yet started. | 8/8 tests passing |
+| `crypto-core` | Cryptographic primitives and messaging state. No networking or UI. | 30/32 tests passing; 2 known failures above |
+| `server` | Opaque HTTP/WebSocket relay with in-memory stores. | 17/17 tests passing |
+| `client-mobile` | React Native service layer and persistence adapters. | 20 test cases defined; run after install |
 
 ## Getting Started
 
@@ -47,6 +55,7 @@ of all three packages.
 cd crypto-core
 npm install
 npm test
+npm run build
 ```
 
 ### server
@@ -54,7 +63,7 @@ npm test
 ```bash
 cd server
 npm install
-npm test         # runs the full test suite, including real client/server integration tests
+npm test
 npm run dev       # starts the server on http://localhost:3000 (WebSocket at /ws)
 ```
 
@@ -65,8 +74,8 @@ curl http://localhost:3000/health
 
 ### client-mobile
 
-The crypto/wire-format layer can be tested standalone under Node (no device or
-simulator needed):
+Install the package dependencies, then test the service layer under Node (no
+device or simulator needed):
 
 ```bash
 cd client-mobile
@@ -75,10 +84,15 @@ npm test
 ```
 
 Running the actual app requires a configured React Native environment
-(Android Studio / Xcode) and is not yet set up, since there's no UI to run.
+(Android Studio / Xcode). No application screens are currently included.
 
 ## Security Principle
 
-No custom cryptographic primitives are implemented from scratch. All encryption, key exchange, and signing operations use `libsodium` (via `libsodium-wrappers` on Node/server, `react-native-libsodium` on-device). See `docs/crypto-spec.md`.
+No custom cryptographic primitives are implemented from scratch. The crypto core
+uses `libsodium-wrappers`; the mobile package is configured for
+`react-native-libsodium` on-device. See `docs/crypto-spec.md`.
 
-The `server` package is architected so it cannot decrypt messages even if a bug were introduced: it never imports `crypto-core`, and only ever handles opaque base64 strings. WebSocket connections require a signed challenge proving ownership of the claimed identity's signing key before the upgrade is accepted.
+The `server` package cannot decrypt messages by design: it never imports
+`crypto-core` and only handles opaque base64 strings plus routing metadata. Its
+current WebSocket username check is suitable for local development only and must
+be replaced with authenticated connection handling before a real deployment.
