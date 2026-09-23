@@ -81,6 +81,7 @@ export function __setStorageAdapterForTesting(customAdapter: StorageAdapter): vo
 }
 
 const IDENTITY_KEY = 'securechat:identity';
+const USERNAME_KEY = 'securechat:username';
 const CONVERSATION_KEY_PREFIX = 'securechat:conversation:';
 
 // --- Serialization helpers -------------------------------------------------
@@ -211,6 +212,18 @@ export async function loadLocalIdentity(): Promise<LocalIdentity | null> {
 
 export async function clearLocalIdentity(): Promise<void> {
   await adapter.removeItem(IDENTITY_KEY);
+}
+
+export async function saveUsername(username: string): Promise<void> {
+  await adapter.setItem(USERNAME_KEY, username);
+}
+
+export async function loadUsername(): Promise<string | null> {
+  return await adapter.getItem(USERNAME_KEY);
+}
+
+export async function clearUsername(): Promise<void> {
+  await adapter.removeItem(USERNAME_KEY);
 }
 
 function conversationKey(conversationId: string): string {

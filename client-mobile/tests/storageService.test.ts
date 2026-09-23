@@ -4,6 +4,9 @@ import {
   saveLocalIdentity,
   loadLocalIdentity,
   clearLocalIdentity,
+  saveUsername,
+  loadUsername,
+  clearUsername,
   saveRatchetState,
   loadRatchetState,
   deleteRatchetState,
@@ -65,6 +68,14 @@ describe('storageService', () => {
     await clearLocalIdentity();
 
     expect(await loadLocalIdentity()).toBeNull();
+  });
+
+  it('saves, loads, and clears the username', async () => {
+    expect(await loadUsername()).toBeNull();
+    await saveUsername('alice');
+    expect(await loadUsername()).toBe('alice');
+    await clearUsername();
+    expect(await loadUsername()).toBeNull();
   });
 
   it('saves and loads ratchet state with all fields intact, including an empty skipped-key store', async () => {

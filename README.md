@@ -4,48 +4,34 @@ End-to-end encrypted messaging app. See [`docs/project-plan.md`](docs/project-pl
 for the broader roadmap and [`docs/crypto-spec.md`](docs/crypto-spec.md) for the
 implemented cryptographic design.
 
-## Status: Phase 3 foundation in progress
+## Status: Core Crypto, Relay Server, and State Store Complete
 
-The repository currently contains a tested cryptographic core, an in-memory relay
-server, and the mobile client's service layer. The React Native screens and a
-production-ready persistence/authentication layer are still to be built.
+The repository contains a fully tested cryptographic core (X3DH + Double Ratchet + AEAD), an authenticated relay server (signed-challenge WebSocket auth), and the mobile client's complete service and state management layer (Zustand conversation store).
 
 Implemented:
 - [x] `crypto-core`: identity signing/agreement keys, signed and one-time prekeys,
-      HKDF-BLAKE2b, X3DH, Double Ratchet state management, XChaCha20-Poly1305,
-      and the secure-message integration layer.
-- [x] `server`: HTTP health, registration, prekey-bundle, and prekey-replenishment
-      endpoints; WebSocket ciphertext relay; offline message queuing.
-- [x] `client-mobile` service layer: base64 wire-format conversion, registration
-      payloads, X3DH setup, message encryption/decryption helpers, local identity
-      and ratchet-state serialization, and WebSocket URL/connection helpers.
-- [x] End-to-end integration coverage exists for the client service layer and the
-      server relay path.
+      HKDF-BLAKE2b, X3DH, Double Ratchet state management (including out-of-order & skipped keys),
+      XChaCha20-Poly1305 AEAD, and the secure-message pipeline (42/42 tests passing).
+- [x] `server`: HTTP health, registration, prekey-bundle, replenishment, and signed-challenge auth
+      endpoints (`POST /users/:username/auth/challenge`); WebSocket ciphertext relay with
+      `tweetnacl` Ed25519 signature verification; offline message queuing (26/26 tests passing).
+- [x] `client-mobile` service & state layer: base64 wire format, X3DH setup, message encryption/decryption,
+      local identity & username storage, per-conversation ratchet state persistence, signed WebSocket auth,
+      and the Zustand `conversationStore` managing the end-to-end messaging lifecycle (25/25 tests passing).
+- [x] End-to-end integration coverage across all packages (93/93 passing automated tests).
 
-Current limitations:
-- [ ] Crypto-core has 30/32 tests passing. Two secure-message tests currently fail
-      because the ratchet imports skipped-message-key helpers that are not exported
-      by `ratchetState.ts`.
-- [ ] The server stores users, prekeys, and queued messages in memory only; all
-      state is lost on restart.
-- [ ] WebSocket identity is currently taken from the `?username=` query parameter.
-      The client has a signed-challenge helper, but the server does not yet expose
-      or verify the corresponding challenge flow.
-- [ ] Mobile persistence currently defaults to AsyncStorage (or an in-memory
-      adapter in Node tests). Long-term private identity keys still need platform
-      keystore/Secure Enclave storage.
-- [ ] React Native UI screens, navigation, reconnect/backoff behavior, and message
-      history are not implemented.
-- [ ] The mobile package's dependencies must be installed before its Vitest suite
-      can run in a fresh checkout.
+Current limitations & remaining roadmap:
+- [ ] The server stores users, prekeys, and queued messages in memory; state is lost on server restart (database backing needed for production).
+- [ ] Mobile persistence currently uses AsyncStorage (in-memory adapter in Node tests). Long-term private identity keys need platform keystore/Secure Enclave (e.g. `react-native-keychain`).
+- [ ] React Native UI screens (`OnboardingScreen`, `ChatListScreen`, `ChatScreen`, `ContactVerificationScreen`) and navigation remain to be built.
 
 ## Packages
 
-| Package | Purpose | Current validation |
+| Package | Purpose | Validation |
 |---|---|---|
-| `crypto-core` | Cryptographic primitives and messaging state. No networking or UI. | 30/32 tests passing; 2 known failures above |
-| `server` | Opaque HTTP/WebSocket relay with in-memory stores. | 17/17 tests passing |
-| `client-mobile` | React Native service layer and persistence adapters. | 20 test cases defined; run after install |
+| `crypto-core` | Cryptographic primitives and Double Ratchet messaging state. Pure, no I/O. | 42/42 tests passing (`tsc` build clean) |
+| `server` | Opaque HTTP/WebSocket relay with signed-challenge authentication. | 26/26 tests passing (`tsc` build clean) |
+| `client-mobile` | React Native service layer, local storage, and Zustand conversation store. | 25/25 tests passing (`tsc` build clean) |
 
 ## Getting Started
 

@@ -16,10 +16,22 @@
  *    relevant chain key one step, producing a one-time message key and a
  *    new chain key. This is what gives forward secrecy within a chain — a
  *    leaked message key can't be used to derive any other message's key.
+ *
+ * Skipped message keys:
+ *  - If messages arrive out of order, intermediate message keys are derived
+ *    and cached in `skippedMessageKeys` so late-arriving messages can still
+ *    be decrypted.
+ *  - Bounded by MAX_SKIP_PER_CHAIN_STEP and MAX_STORED_SKIPPED_KEYS to prevent
+ *    malicious peers from exhausting memory or CPU.
  */
 
 import sodium from 'libsodium-wrappers';
 import { hkdfBlake2b, keyedBlake2b } from '../encryption/hkdfBlake2b';
+
+export type SkippedMessageKeyStore = Map<string, Uint8Array>;
+
+export const MAX_SKIP_PER_CHAIN_STEP = 2000;
+export const MAX_STORED_SKIPPED_KEYS = 2000;
 
 export interface DHKeyPair {
   publicKey: Uint8Array;
@@ -35,6 +47,7 @@ export interface RatchetState {
   sendMessageNumber: number;
   receiveMessageNumber: number;
   previousSendingChainLength: number;
+  skippedMessageKeys: SkippedMessageKeyStore;
 }
 
 let readyPromise: Promise<void> | null = null;
@@ -99,4 +112,80 @@ export async function kdfChainKey(
     keyedBlake2b(chainKey, CHAIN_KEY_CONSTANT, 32),
   ]);
   return { messageKey, nextChainKey };
+}
+
+/**
+ * Formats a unique label for a skipped message key based on the remote DH public key
+ * and message number.
+ */
+export async function skippedKeyLabel(
+  remoteDHPublicKey: Uint8Array,
+  messageNumber: number
+): Promise<string> {
+  await ensureReady();
+  return `${sodium.to_base64(remoteDHPublicKey)}:${messageNumber}`;
+}
+
+/**
+ * Skips chain messages up to `untilMessageNumber`, deriving intermediate message keys
+ * and collecting them with their label.
+ */
+export async function skipChainMessages(
+  remoteDHPublicKey: Uint8Array,
+  chainKey: Uint8Array,
+  currentMessageNumber: number,
+  untilMessageNumber: number
+): Promise<{ chainKey: Uint8Array; skipped: [string, Uint8Array][] }> {
+  if (untilMessageNumber - currentMessageNumber > MAX_SKIP_PER_CHAIN_STEP) {
+    throw new Error(
+      `Too many messages skipped in one step: ${untilMessageNumber - currentMessageNumber} > ${MAX_SKIP_PER_CHAIN_STEP}`
+    );
+  }
+
+  const skipped: [string, Uint8Array][] = [];
+  let curChainKey = chainKey;
+
+  for (let i = currentMessageNumber; i < untilMessageNumber; i++) {
+    const { messageKey, nextChainKey } = await kdfChainKey(curChainKey);
+    const label = await skippedKeyLabel(remoteDHPublicKey, i);
+    skipped.push([label, messageKey]);
+    curChainKey = nextChainKey;
+  }
+
+  return { chainKey: curChainKey, skipped };
+}
+
+/**
+ * Returns a new SkippedMessageKeyStore with additional keys added, enforcing
+ * the MAX_STORED_SKIPPED_KEYS bound by pruning oldest entries if necessary.
+ */
+export function withSkippedMessageKeysAdded(
+  current: SkippedMessageKeyStore,
+  toAdd: [string, Uint8Array][]
+): SkippedMessageKeyStore {
+  const next = new Map(current);
+  for (const [label, key] of toAdd) {
+    next.set(label, key);
+  }
+
+  while (next.size > MAX_STORED_SKIPPED_KEYS) {
+    const firstKey = next.keys().next().value;
+    if (firstKey !== undefined) {
+      next.delete(firstKey);
+    }
+  }
+
+  return next;
+}
+
+/**
+ * Returns a new SkippedMessageKeyStore with the specified key removed after use.
+ */
+export function withSkippedMessageKeyRemoved(
+  current: SkippedMessageKeyStore,
+  label: string
+): SkippedMessageKeyStore {
+  const next = new Map(current);
+  next.delete(label);
+  return next;
 }

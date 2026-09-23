@@ -89,3 +89,7 @@ export function addOneTimePreKeys(username: string, keys: OneTimePreKeyRecord[])
 export function remainingOneTimePreKeyCount(username: string): number {
   return users.get(username)?.oneTimePreKeys.length ?? 0;
 }
+
+export function getIdentitySigningPublicKey(username: string): string | null {
+  return users.get(username)?.identitySigningPublicKey ?? null;
+}

@@ -24,6 +24,7 @@ import {
   SignedPreKeyRecord,
   OneTimePreKeyRecord,
 } from '../store/userStore';
+import { createChallenge } from '../auth/challengeStore';
 
 export const usersRouter = Router();
 
@@ -123,4 +124,15 @@ usersRouter.post('/:username/prekeys', (req: Request, res: Response) => {
 
   addOneTimePreKeys(username, (req.body as AddPreKeysRequestBody).oneTimePreKeys);
   return res.status(200).json({ remaining: remainingOneTimePreKeyCount(username) });
+});
+
+usersRouter.post('/:username/auth/challenge', (req: Request, res: Response) => {
+  const { username } = req.params;
+
+  if (!userExists(username)) {
+    return res.status(404).json({ error: `User "${username}" not found` });
+  }
+
+  const challenge = createChallenge(username);
+  return res.status(200).json({ challenge });
 });

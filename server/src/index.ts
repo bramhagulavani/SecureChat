@@ -1,21 +1,16 @@
 /**
  * SecureChat Relay Server — entry point.
  *
- * Combines the HTTP API (registration, prekey bundles) and the WebSocket
- * relay (ciphertext routing) on one server.
+ * Combines the HTTP API (registration, prekey bundles, auth challenges) and
+ * the WebSocket relay (ciphertext routing) on one server.
  *
- * Security invariant for this whole package: no function in `server/`
- * should ever import a decryption routine from `crypto-core`. The server
- * package doesn't even list crypto-core as a dependency, so this can't
- * happen by accident.
- *
- * Known simplification, flagged for follow-up: the WebSocket handshake
- * identifies a user via a `?username=` query param with no auth token or
- * signature check. That's fine for local development and the tests in this
- * package, but is NOT sufficient for a real deployment — anyone could claim
- * any username and receive their queued messages. Proper auth (e.g. a
- * signed challenge using the user's identity key, or a session token issued
- * at registration) needs to land before this touches real users.
+ * Security invariants:
+ *   - No decryption capability: `server/` never imports `crypto-core` and has
+ *     zero decryption capability.
+ *   - Signed-challenge auth: WebSocket connections must present a valid
+ *     signature over a freshly-issued single-use challenge signed with the
+ *     user's identity signing private key. Verified via `tweetnacl` in
+ *     `verifyClient`.
  */
 
 import http from 'http';
@@ -23,13 +18,54 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createApp } from './app';
 import { addConnection, removeConnection } from './ws/connectionManager';
 import { deliverQueuedMessages, routeMessage, IncomingRelayMessage } from './ws/messageRouter';
+import { getIdentitySigningPublicKey } from './store/userStore';
+import { consumeChallenge } from './auth/challengeStore';
+import { verifyAuthSignature } from './auth/verifySignature';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 export function startServer(port: number = PORT): http.Server {
   const app = createApp();
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server, path: '/ws' });
+
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    verifyClient: (info, callback) => {
+      try {
+        const url = new URL(info.req.url ?? '', 'http://localhost');
+        const username = url.searchParams.get('username');
+        const signature = url.searchParams.get('signature');
+
+        if (!username || !signature) {
+          callback(false, 401, 'Unauthorized: username and signature query params are required');
+          return;
+        }
+
+        const signingPublicKey = getIdentitySigningPublicKey(username);
+        if (!signingPublicKey) {
+          callback(false, 401, 'Unauthorized: user not registered');
+          return;
+        }
+
+        const challenge = consumeChallenge(username);
+        if (!challenge) {
+          callback(false, 401, 'Unauthorized: invalid or expired challenge');
+          return;
+        }
+
+        const isValid = verifyAuthSignature(challenge, signature, signingPublicKey);
+        if (!isValid) {
+          callback(false, 401, 'Unauthorized: invalid signature');
+          return;
+        }
+
+        callback(true);
+      } catch {
+        callback(false, 500, 'Internal server error during auth verification');
+      }
+    },
+  });
 
   wss.on('connection', (socket: WebSocket, request) => {
     const url = new URL(request.url ?? '', 'http://localhost');
